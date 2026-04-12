@@ -1,10 +1,19 @@
 const express = require("express");
+const http = require("http");
+const { Server } = require("socket.io");
 const authRoutes = require("./src/modules/auth/auth.routes");
 const betRoutes = require("./src/modules/bet/bet.routes");
 const gameRoutes = require("./src/modules/game/game.routes");
 const walletRoutes = require("./src/modules/wallet/wallet.routes");
+const { setupGameSocket } = require("./src/socket/game.socket");
 
 const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+  },
+});
 
 app.set("etag", false);
 app.use(express.json());
@@ -18,6 +27,8 @@ app.get("/", (req, res) => {
   res.send("API Running");
 });
 
-app.listen(5000, () => {
-  console.log("Server running on port 5000");
+setupGameSocket(io);
+
+server.listen(5000, () => {
+  console.log("Server + Socket running on port 5000");
 });
