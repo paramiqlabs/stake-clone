@@ -1,0 +1,84 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model Game {
+  id               BigInt             @id @default(autoincrement()) @db.UnsignedBigInt
+  name             String             @db.VarChar(150)
+  slug             String             @unique(map: "slug") @db.VarChar(150)
+  provider         String             @db.VarChar(100)
+  providerGameId   String?            @map("provider_game_id") @db.VarChar(150)
+  thumbnail        String?            @db.VarChar(255)
+  banner           String?            @db.VarChar(255)
+  description      String?            @db.Text
+  gameUrl          String?            @map("game_url") @db.Text
+  launchType       games_launch_type? @default(iframe) @map("launch_type")
+  category         String?            @db.VarChar(100)
+  tags             String?            @db.LongText
+  isActive         Boolean?           @default(true) @map("is_active")
+  isFeatured       Boolean?           @default(false) @map("is_featured")
+  isMaintenance    Boolean?           @default(false) @map("is_maintenance")
+  sortOrder        Int?               @default(0) @map("sort_order")
+  config           String?            @db.LongText
+  popularity_score Int?               @default(0)
+  play_count       BigInt?            @default(0)
+  created_at       DateTime           @default(now()) @db.Timestamp(0)
+  updated_at       DateTime           @default(now()) @db.Timestamp(0)
+
+  @@index([isActive], map: "idx_active")
+  @@index([category], map: "idx_category")
+  @@index([provider], map: "idx_provider")
+  @@map("games")
+}
+
+enum games_launch_type {
+  iframe
+  redirect
+  internal
+}
+
+model User {
+  id           BigInt        @id @default(autoincrement()) @db.UnsignedBigInt
+  email        String        @unique @db.VarChar(191)
+  password     String        @db.VarChar(255)
+  role         user_role     @default(user)
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamp(0)
+  wallet       Wallet?
+  transactions Transaction[]
+
+  @@map("users")
+}
+
+enum user_role {
+  user
+  admin
+}
+
+model Wallet {
+  id        BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  userId    BigInt   @unique @db.UnsignedBigInt
+  balance   Decimal  @default(0.00)
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("wallets")
+}
+
+model Transaction {
+  id        BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  userId    BigInt   @db.UnsignedBigInt
+  amount    Decimal
+  type      String
+  status    String
+  reference String?
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@map("transactions")
+}
