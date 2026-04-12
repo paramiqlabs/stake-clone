@@ -29,6 +29,7 @@ model Game {
   play_count       BigInt?            @default(0)
   created_at       DateTime           @default(now()) @db.Timestamp(0)
   updated_at       DateTime           @default(now()) @db.Timestamp(0)
+  bets             Bet[]
 
   @@index([isActive], map: "idx_active")
   @@index([category], map: "idx_category")
@@ -50,6 +51,7 @@ model User {
   createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamp(0)
   wallet       Wallet?
   transactions Transaction[]
+  bets         Bet[]
 
   @@map("users")
 }
@@ -81,4 +83,19 @@ model Transaction {
   createdAt DateTime @default(now())
 
   @@map("transactions")
+}
+
+model Bet {
+  id        BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  userId    BigInt    @db.UnsignedBigInt
+  gameId    BigInt    @db.UnsignedBigInt
+  amount    Decimal
+  payout    Decimal?
+  status    String
+  user      User      @relation(fields: [userId], references: [id])
+  game      Game      @relation(fields: [gameId], references: [id])
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@map("bets")
 }
