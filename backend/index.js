@@ -5,6 +5,7 @@ const authRoutes = require("./src/modules/auth/auth.routes");
 const betRoutes = require("./src/modules/bet/bet.routes");
 const gameRoutes = require("./src/modules/game/game.routes");
 const walletRoutes = require("./src/modules/wallet/wallet.routes");
+const { authenticateSocket } = require("./src/socket/socket.auth");
 const { setupGameSocket } = require("./src/socket/game.socket");
 
 const app = express();
@@ -14,6 +15,8 @@ const io = new Server(server, {
     origin: "*",
   },
 });
+
+io.use(authenticateSocket);
 
 app.set("etag", false);
 app.use(express.json());
