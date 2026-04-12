@@ -6,9 +6,6 @@ const SOCKET_ERROR_EVENT = "socket_error";
 const roomName = (gameId) => `game:${gameId}`;
 const playerCountKey = (gameId) => `game:${gameId}:players`;
 
-// In-memory dedupe guard: track concurrent socket joins by user per game.
-const userPresenceByGame = new Map();
-
 const normalizeGameId = (value) => {
   if (value === undefined || value === null) {
     return null;
@@ -20,31 +17,25 @@ const normalizeGameId = (value) => {
 
 const getPlayerCount = async (gameId) => {
   try {
-    const current = await redis.get(playerCountKey(gameId));
-    return Number(current || 0);
+    return await redis.scard(playerCountKey(gameId));
   } catch (error) {
     return 0;
   }
 };
 
-const incrementPlayerCount = async (gameId) => {
+const addPlayerToGame = async (gameId, userId) => {
   try {
-    return await redis.incr(playerCountKey(gameId));
+    await redis.sadd(playerCountKey(gameId), userId);
+    return await getPlayerCount(gameId);
   } catch (error) {
     return null;
   }
 };
 
-const decrementPlayerCount = async (gameId) => {
+const removePlayerFromGame = async (gameId, userId) => {
   try {
-    const key = playerCountKey(gameId);
-    const updated = await redis.decr(key);
-    if (updated < 0) {
-      await redis.set(key, 0);
-      return 0;
-    }
-
-    return updated;
+    await redis.srem(playerCountKey(gameId), userId);
+    return await getPlayerCount(gameId);
   } catch (error) {
     return null;
   }
@@ -68,48 +59,6 @@ const ensureSocketAuthenticated = (socket) => {
   return false;
 };
 
-const getUserGamePresenceCount = (gameId, userId) => {
-  const gamePresence = userPresenceByGame.get(gameId);
-  if (!gamePresence) {
-    return 0;
-  }
-
-  return gamePresence.get(userId) || 0;
-};
-
-const addUserGamePresence = (gameId, userId) => {
-  let gamePresence = userPresenceByGame.get(gameId);
-  if (!gamePresence) {
-    gamePresence = new Map();
-    userPresenceByGame.set(gameId, gamePresence);
-  }
-
-  const current = gamePresence.get(userId) || 0;
-  const updated = current + 1;
-  gamePresence.set(userId, updated);
-  return updated;
-};
-
-const removeUserGamePresence = (gameId, userId) => {
-  const gamePresence = userPresenceByGame.get(gameId);
-  if (!gamePresence) {
-    return 0;
-  }
-
-  const current = gamePresence.get(userId) || 0;
-  if (current <= 1) {
-    gamePresence.delete(userId);
-    if (gamePresence.size === 0) {
-      userPresenceByGame.delete(gameId);
-    }
-    return 0;
-  }
-
-  const updated = current - 1;
-  gamePresence.set(userId, updated);
-  return updated;
-};
-
 const setupGameSocket = (io) => {
   io.on("connection", (socket) => {
     if (!ensureSocketAuthenticated(socket)) {
@@ -117,7 +66,7 @@ const setupGameSocket = (io) => {
     }
 
     console.log(`[socket] user connected: socket=${socket.id} userId=${socket.user.id}`);
-    socket.data.joinedGames = new Set();
+    socket.data.gameId = null;
 
     socket.on("join_game", async (payload) => {
       if (!ensureSocketAuthenticated(socket)) {
@@ -130,22 +79,23 @@ const setupGameSocket = (io) => {
         return;
       }
 
-      if (socket.data.joinedGames.has(gameId)) {
+      if (socket.data.gameId === gameId) {
         await emitPlayerCountUpdate(io, gameId);
         return;
       }
 
+      // Leave current game before joining a new one.
+      if (socket.data.gameId) {
+        const previousGameId = socket.data.gameId;
+        socket.leave(roomName(previousGameId));
+        const previousPlayers = await removePlayerFromGame(previousGameId, socket.user.id);
+        await emitPlayerCountUpdate(io, previousGameId, previousPlayers);
+      }
+
       socket.join(roomName(gameId));
-      socket.data.joinedGames.add(gameId);
+      socket.data.gameId = gameId;
 
-      const presenceCount = addUserGamePresence(gameId, socket.user.id);
-
-      // Duplicate same-user joins should not inflate live player count.
-      const players =
-        presenceCount === 1
-          ? await incrementPlayerCount(gameId)
-          : await getPlayerCount(gameId);
-
+      const players = await addPlayerToGame(gameId, socket.user.id);
       await emitPlayerCountUpdate(io, gameId, players);
     });
 
@@ -154,35 +104,28 @@ const setupGameSocket = (io) => {
         return;
       }
 
-      const gameId = normalizeGameId(payload?.gameId);
-      if (!gameId || !socket.data.joinedGames.has(gameId)) {
+      const requestedGameId = normalizeGameId(payload?.gameId);
+      const gameId = requestedGameId || socket.data.gameId;
+      if (!gameId || socket.data.gameId !== gameId) {
         return;
       }
 
       socket.leave(roomName(gameId));
-      socket.data.joinedGames.delete(gameId);
+      socket.data.gameId = null;
 
-      const presenceCount = removeUserGamePresence(gameId, socket.user.id);
-      const players =
-        presenceCount === 0
-          ? await decrementPlayerCount(gameId)
-          : await getPlayerCount(gameId);
-
+      const players = await removePlayerFromGame(gameId, socket.user.id);
       await emitPlayerCountUpdate(io, gameId, players);
     });
 
     socket.on("disconnect", async () => {
-      const joinedGames = Array.from(socket.data.joinedGames || []);
-
-      for (const gameId of joinedGames) {
-        const presenceCount = removeUserGamePresence(gameId, socket.user.id);
-        const players =
-          presenceCount === 0
-            ? await decrementPlayerCount(gameId)
-            : await getPlayerCount(gameId);
-
-        await emitPlayerCountUpdate(io, gameId, players);
+      const gameId = socket.data.gameId;
+      if (!gameId) {
+        return;
       }
+
+      const players = await removePlayerFromGame(gameId, socket.user.id);
+      await emitPlayerCountUpdate(io, gameId, players);
+      socket.data.gameId = null;
     });
   });
 };
