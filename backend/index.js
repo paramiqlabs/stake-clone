@@ -8,6 +8,8 @@ const walletRoutes = require("./src/modules/wallet/wallet.routes");
 const { authenticateSocket } = require("./src/socket/socket.auth");
 const { setupGameSocket } = require("./src/socket/game.socket");
 
+const PORT = Number(process.env.PORT) || 5000;
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -27,11 +29,21 @@ app.use(gameRoutes);
 app.use(walletRoutes);
 
 app.get("/", (req, res) => {
-  res.send("API Running");
+  res.send("API Run");
 });
 
 setupGameSocket(io);
 
-server.listen(5000, () => {
-  console.log("Server + Socket running on port 5000");
+server.on("error", (error) => {
+  if (error.code === "EADDRINUSE") {
+    console.error(`[server] port ${PORT} is already in use`);
+    console.error("[server] stop the existing process or set a different PORT in .env");
+    process.exit(1);
+  }
+
+  throw error;
+});
+
+server.listen(PORT, () => {
+  console.log(`Server + Socket running on port ${PORT}`);
 });
