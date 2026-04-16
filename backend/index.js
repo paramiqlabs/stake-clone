@@ -7,6 +7,11 @@ const gameRoutes = require("./src/modules/game/game.routes");
 const walletRoutes = require("./src/modules/wallet/wallet.routes");
 const { authenticateSocket } = require("./src/socket/socket.auth");
 const { setupGameSocket } = require("./src/socket/game.socket");
+const prisma = require("./src/lib/prisma");
+const {
+  DATABASE_UNAVAILABLE_MESSAGE,
+  isDatabaseUnavailableError,
+} = require("./src/lib/database.errors");
 
 const PORT = Number(process.env.PORT) || 5000;
 
@@ -32,8 +37,6 @@ app.get("/", (req, res) => {
   res.send("API Run");
 });
 
-setupGameSocket(io);
-
 server.on("error", (error) => {
   if (error.code === "EADDRINUSE") {
     console.error(`[server] port ${PORT} is already in use`);
@@ -44,6 +47,23 @@ server.on("error", (error) => {
   throw error;
 });
 
-server.listen(PORT, () => {
-  console.log(`Server + Socket running on port ${PORT}`);
-});
+const startServer = async () => {
+  try {
+    await prisma.$connect();
+    console.log("[server] database connection ready");
+  } catch (error) {
+    if (isDatabaseUnavailableError(error)) {
+      console.error(`[server] ${DATABASE_UNAVAILABLE_MESSAGE}`);
+      console.error("[server] auth routes may return 503 until MySQL is available");
+    } else {
+      throw error;
+    }
+  }
+
+  setupGameSocket(io);
+  server.listen(PORT, () => {
+    console.log(`Server + Socket running on port ${PORT}`);
+  });
+};
+
+startServer();

@@ -5,6 +5,10 @@
   "main": "index.js",
   "scripts": {
     "dev": "node index.js",
+    "prisma:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:seed": "node prisma/seed.js",
+    "db:setup": "npm run prisma:generate && npm run db:push && npm run db:seed",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

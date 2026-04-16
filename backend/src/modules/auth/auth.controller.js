@@ -1,4 +1,8 @@
 const authService = require("./auth.service");
+const {
+  DATABASE_UNAVAILABLE_MESSAGE,
+  isDatabaseUnavailableError,
+} = require("../../lib/database.errors");
 
 const isBadRequestError = (message) =>
   message.includes("required") ||
@@ -12,6 +16,13 @@ const register = async (req, res) => {
     const result = await authService.register(req.body);
     return res.status(201).json({ success: true, data: result });
   } catch (error) {
+    if (isDatabaseUnavailableError(error)) {
+      return res.status(503).json({
+        success: false,
+        message: DATABASE_UNAVAILABLE_MESSAGE,
+      });
+    }
+
     const message = error?.message || "Internal server error";
     if (isBadRequestError(message)) {
       return res.status(400).json({ success: false, message });
@@ -24,8 +35,15 @@ const register = async (req, res) => {
 const login = async (req, res) => {
   try {
     const result = await authService.login(req.body);
-    return res.status(200).json({ success: true, data: result });
+    return res.status(200).json({ token: result.token });
   } catch (error) {
+    if (isDatabaseUnavailableError(error)) {
+      return res.status(503).json({
+        success: false,
+        message: DATABASE_UNAVAILABLE_MESSAGE,
+      });
+    }
+
     const message = error?.message || "Internal server error";
 
     if (message === "Invalid credentials") {
