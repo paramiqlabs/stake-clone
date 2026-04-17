@@ -7,6 +7,7 @@ const gameRoutes = require("./src/modules/game/game.routes");
 const walletRoutes = require("./src/modules/wallet/wallet.routes");
 const { authenticateSocket } = require("./src/socket/socket.auth");
 const { setupGameSocket } = require("./src/socket/game.socket");
+const { setupCrashSocket } = require("./src/socket/crash.socket");
 const prisma = require("./src/lib/prisma");
 const {
   DATABASE_UNAVAILABLE_MESSAGE,
@@ -61,6 +62,7 @@ const startServer = async () => {
   }
 
   setupGameSocket(io);
+  await setupCrashSocket(io);
   server.listen(PORT, () => {
     console.log(`Server + Socket running on port ${PORT}`);
   });
