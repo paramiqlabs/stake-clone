@@ -1,11 +1,15 @@
 const redis = require("../../lib/redis");
+const crypto = require("crypto");
 
 const CRASH_STATE_KEY = "crash:round:state";
+const CRASH_FAIR_STATE_KEY = "crash:round:fair";
 
 const CRASH_EVENTS = {
   TICK: "crash_tick",
   START: "crash_start",
   END: "crash_end",
+  SEED_HASH: "crash_seed_hash",
+  SEED_REVEAL: "crash_seed_reveal",
 };
 
 const ROUND_STATUS = {
@@ -20,6 +24,7 @@ const DEFAULTS = {
   minCrashPoint: 1.2,
   maxCrashPoint: 10,
   growthRate: 0.01, // ~1% per tick exponential growth
+  defaultClientSeed: "stake-clone-client-seed",
 };
 
 const roundToTwo = (value) => Math.round(value * 100) / 100;
@@ -46,6 +51,15 @@ class CrashEngine {
       status: ROUND_STATUS.WAITING,
       updatedAt: Date.now(),
     };
+
+    this.currentFairState = {
+      roundId: null,
+      serverSeed: null,
+      serverSeedHash: null,
+      clientSeed: this.options.defaultClientSeed,
+      nonce: 0,
+      updatedAt: Date.now(),
+    };
   }
 
   setIo(io) {
@@ -57,6 +71,7 @@ class CrashEngine {
       return false;
     }
 
+    await this.hydrateFairState();
     this.isStarted = true;
     this.runLoop().catch((error) => {
       console.error("[crash-engine] loop stopped unexpectedly:", error.message);
@@ -101,7 +116,8 @@ class CrashEngine {
 
   async runSingleRound() {
     const roundId = `${Date.now()}-${++this.roundCounter}`;
-    const crashPoint = this.generateCrashPoint();
+    const fairRound = await this.createRoundFairState(roundId);
+    const crashPoint = this.generateCrashPointFromFairState(fairRound);
 
     await this.persistState({
       roundId,
@@ -109,6 +125,14 @@ class CrashEngine {
       crashPoint,
       status: ROUND_STATUS.WAITING,
       updatedAt: Date.now(),
+    });
+
+    this.emit(CRASH_EVENTS.SEED_HASH, {
+      roundId,
+      nonce: fairRound.nonce,
+      clientSeed: fairRound.clientSeed,
+      serverSeedHash: fairRound.serverSeedHash,
+      status: ROUND_STATUS.WAITING,
     });
 
     await this.wait(this.options.startDelayMs);
@@ -183,6 +207,17 @@ class CrashEngine {
               status: ROUND_STATUS.CRASHED,
             });
 
+            const fairState = await this.getFairState();
+            if (fairState?.roundId === roundId && fairState?.serverSeed) {
+              this.emit(CRASH_EVENTS.SEED_REVEAL, {
+                roundId,
+                nonce: fairState.nonce,
+                clientSeed: fairState.clientSeed,
+                serverSeed: fairState.serverSeed,
+                serverSeedHash: fairState.serverSeedHash,
+              });
+            }
+
             await this.runHook("onRoundCrash", {
               roundId,
               multiplier,
@@ -229,6 +264,24 @@ class CrashEngine {
     return roundToTwo(random);
   }
 
+  generateCrashPointFromFairState(fairState) {
+    const { minCrashPoint, maxCrashPoint } = this.options;
+    const message = `${fairState.clientSeed}:${fairState.nonce}`;
+    const hmacHex = crypto
+      .createHmac("sha256", fairState.serverSeed)
+      .update(message)
+      .digest("hex");
+
+    // Use first 52 bits so conversion stays inside JS safe integer precision.
+    const slice = hmacHex.slice(0, 13);
+    const hashInt = parseInt(slice, 16);
+    const maxInt = 0x1fffffffffffff;
+    const ratio = hashInt / maxInt;
+
+    const crashPoint = minCrashPoint + ratio * (maxCrashPoint - minCrashPoint);
+    return roundToTwo(crashPoint);
+  }
+
   emit(event, payload) {
     if (!this.io) {
       return;
@@ -267,6 +320,70 @@ class CrashEngine {
     return new Promise((resolve) => {
       setTimeout(resolve, ms);
     });
+  }
+
+  async hydrateFairState() {
+    try {
+      const fromRedis = await redis.get(CRASH_FAIR_STATE_KEY);
+      if (!fromRedis) {
+        return;
+      }
+
+      const parsed = JSON.parse(fromRedis);
+      if (typeof parsed?.nonce === "number" && Number.isFinite(parsed.nonce)) {
+        this.currentFairState = {
+          ...this.currentFairState,
+          ...parsed,
+          nonce: Math.max(0, Math.trunc(parsed.nonce)),
+        };
+      }
+    } catch (error) {
+      // fallback to in-memory defaults
+    }
+  }
+
+  async getFairState() {
+    try {
+      const fromRedis = await redis.get(CRASH_FAIR_STATE_KEY);
+      if (!fromRedis) {
+        return this.currentFairState;
+      }
+
+      const parsed = JSON.parse(fromRedis);
+      this.currentFairState = {
+        ...this.currentFairState,
+        ...parsed,
+      };
+
+      return this.currentFairState;
+    } catch (error) {
+      return this.currentFairState;
+    }
+  }
+
+  async createRoundFairState(roundId) {
+    const nextNonce = Number(this.currentFairState?.nonce || 0) + 1;
+    const serverSeed = crypto.randomBytes(32).toString("hex");
+    const serverSeedHash = crypto.createHash("sha256").update(serverSeed).digest("hex");
+
+    const fairState = {
+      roundId,
+      serverSeed,
+      serverSeedHash,
+      clientSeed: this.options.defaultClientSeed,
+      nonce: nextNonce,
+      updatedAt: Date.now(),
+    };
+
+    this.currentFairState = fairState;
+
+    try {
+      await redis.set(CRASH_FAIR_STATE_KEY, JSON.stringify(fairState));
+    } catch (error) {
+      // fallback to in-memory state only
+    }
+
+    return fairState;
   }
 
   async runHook(hookName, payload) {
