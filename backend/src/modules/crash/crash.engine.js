@@ -35,6 +35,10 @@ class CrashEngine {
     this.isStarted = false;
     this.roundCounter = 0;
     this.tickIntervalId = null;
+    this.hooks = {
+      onRoundStart: null,
+      onRoundCrash: null,
+    };
     this.currentState = {
       roundId: null,
       multiplier: 1,
@@ -61,6 +65,13 @@ class CrashEngine {
     });
 
     return true;
+  }
+
+  setHooks(hooks = {}) {
+    this.hooks = {
+      ...this.hooks,
+      ...hooks,
+    };
   }
 
   async getState() {
@@ -120,6 +131,13 @@ class CrashEngine {
       status: ROUND_STATUS.RUNNING,
     });
 
+    await this.runHook("onRoundStart", {
+      roundId,
+      multiplier: 1,
+      crashPoint,
+      status: ROUND_STATUS.RUNNING,
+    });
+
     await this.runTickLoop(roundId, crashPoint);
   }
 
@@ -136,54 +154,66 @@ class CrashEngine {
 
         tickInProgress = true;
 
-        if (!this.isStarted) {
-          this.clearTickInterval();
-          tickInProgress = false;
-          resolve();
-          return;
-        }
+        try {
+          if (!this.isStarted) {
+            this.clearTickInterval();
+            tickInProgress = false;
+            resolve();
+            return;
+          }
 
-        multiplier = this.nextMultiplier(multiplier);
+          multiplier = this.nextMultiplier(multiplier);
 
-        if (multiplier >= crashPoint) {
-          multiplier = crashPoint;
-          this.clearTickInterval();
+          if (multiplier >= crashPoint) {
+            multiplier = crashPoint;
+            this.clearTickInterval();
+
+            await this.persistState({
+              roundId,
+              multiplier,
+              crashPoint,
+              status: ROUND_STATUS.CRASHED,
+              crashedAt: Date.now(),
+              updatedAt: Date.now(),
+            });
+
+            this.emit(CRASH_EVENTS.END, {
+              roundId,
+              multiplier,
+              status: ROUND_STATUS.CRASHED,
+            });
+
+            await this.runHook("onRoundCrash", {
+              roundId,
+              multiplier,
+              crashPoint,
+              status: ROUND_STATUS.CRASHED,
+            });
+
+            tickInProgress = false;
+            resolve();
+            return;
+          }
 
           await this.persistState({
             roundId,
             multiplier,
             crashPoint,
-            status: ROUND_STATUS.CRASHED,
-            crashedAt: Date.now(),
+            status: ROUND_STATUS.RUNNING,
             updatedAt: Date.now(),
           });
 
-          this.emit(CRASH_EVENTS.END, {
+          this.emit(CRASH_EVENTS.TICK, {
             roundId,
             multiplier,
-            status: ROUND_STATUS.CRASHED,
+            status: ROUND_STATUS.RUNNING,
           });
 
           tickInProgress = false;
-          resolve();
-          return;
+        } catch (error) {
+          console.error("[crash-engine] tick error:", error.message);
+          tickInProgress = false;
         }
-
-        await this.persistState({
-          roundId,
-          multiplier,
-          crashPoint,
-          status: ROUND_STATUS.RUNNING,
-          updatedAt: Date.now(),
-        });
-
-        this.emit(CRASH_EVENTS.TICK, {
-          roundId,
-          multiplier,
-          status: ROUND_STATUS.RUNNING,
-        });
-
-        tickInProgress = false;
       }, this.options.tickIntervalMs);
     });
   }
@@ -237,6 +267,19 @@ class CrashEngine {
     return new Promise((resolve) => {
       setTimeout(resolve, ms);
     });
+  }
+
+  async runHook(hookName, payload) {
+    const hook = this.hooks?.[hookName];
+    if (typeof hook !== "function") {
+      return;
+    }
+
+    try {
+      await hook(payload);
+    } catch (error) {
+      console.error(`[crash-engine] hook ${hookName} failed:`, error.message);
+    }
   }
 }
 
