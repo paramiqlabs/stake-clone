@@ -89,13 +89,16 @@ model Bet {
   id        BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
   userId    BigInt    @db.UnsignedBigInt
   gameId    BigInt    @db.UnsignedBigInt
+  crashRoundId String? @map("crash_round_id") @db.VarChar(64)
   amount    Decimal
   payout    Decimal?
+  cashoutMultiplier Decimal? @map("cashout_multiplier")
   status    String
   user      User      @relation(fields: [userId], references: [id])
   game      Game      @relation(fields: [gameId], references: [id])
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
+  @@index([crashRoundId, status], map: "idx_bets_crash_round_status")
   @@map("bets")
 }
