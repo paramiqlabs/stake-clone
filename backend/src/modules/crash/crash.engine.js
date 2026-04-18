@@ -1,8 +1,7 @@
 const redis = require("../../lib/redis");
 const crypto = require("crypto");
 
-const CRASH_STATE_KEY = "crash:round:state";
-const CRASH_FAIR_STATE_KEY = "crash:round:fair";
+const CRASH_CURRENT_ROUND_KEY = "crash:current_round";
 
 const CRASH_EVENTS = {
   TICK: "crash_tick",
@@ -40,6 +39,8 @@ class CrashEngine {
     this.isStarted = false;
     this.roundCounter = 0;
     this.tickIntervalId = null;
+    this.lastNonce = 0;
+    this.recoveredWaitingRound = null;
     this.hooks = {
       onRoundStart: null,
       onRoundCrash: null,
@@ -48,16 +49,12 @@ class CrashEngine {
       roundId: null,
       multiplier: 1,
       crashPoint: null,
-      status: ROUND_STATUS.WAITING,
-      updatedAt: Date.now(),
-    };
-
-    this.currentFairState = {
-      roundId: null,
       serverSeed: null,
       serverSeedHash: null,
       clientSeed: this.options.defaultClientSeed,
       nonce: 0,
+      startedAt: null,
+      status: ROUND_STATUS.WAITING,
       updatedAt: Date.now(),
     };
   }
@@ -71,7 +68,8 @@ class CrashEngine {
       return false;
     }
 
-    await this.hydrateFairState();
+    await this.hydrateCurrentRoundState();
+    await this.recoverRoundOnStartup();
     this.isStarted = true;
     this.runLoop().catch((error) => {
       console.error("[crash-engine] loop stopped unexpectedly:", error.message);
@@ -91,7 +89,7 @@ class CrashEngine {
 
   async getState() {
     try {
-      const fromRedis = await redis.get(CRASH_STATE_KEY);
+      const fromRedis = await redis.get(CRASH_CURRENT_ROUND_KEY);
       if (!fromRedis) {
         return this.currentState;
       }
@@ -99,7 +97,7 @@ class CrashEngine {
       const parsed = JSON.parse(fromRedis);
       this.currentState = {
         ...this.currentState,
-        ...parsed,
+        ...this.normalizeRoundState(parsed),
       };
 
       return this.currentState;
@@ -110,29 +108,23 @@ class CrashEngine {
 
   async runLoop() {
     while (this.isStarted) {
-      await this.runSingleRound();
+      const recoveredRound = this.recoveredWaitingRound;
+      this.recoveredWaitingRound = null;
+      await this.runSingleRound(recoveredRound);
     }
   }
 
-  async runSingleRound() {
-    const roundId = `${Date.now()}-${++this.roundCounter}`;
-    const fairRound = await this.createRoundFairState(roundId);
-    const crashPoint = this.generateCrashPointFromFairState(fairRound);
-
-    await this.persistState({
-      roundId,
-      multiplier: 1,
-      crashPoint,
-      status: ROUND_STATUS.WAITING,
-      updatedAt: Date.now(),
-    });
+  async runSingleRound(recoveredRound = null) {
+    const roundContext = recoveredRound || this.createNewRoundContext();
+    await this.persistState(roundContext);
 
     this.emit(CRASH_EVENTS.SEED_HASH, {
-      roundId,
-      nonce: fairRound.nonce,
-      clientSeed: fairRound.clientSeed,
-      serverSeedHash: fairRound.serverSeedHash,
+      roundId: roundContext.roundId,
+      nonce: roundContext.nonce,
+      clientSeed: roundContext.clientSeed,
+      serverSeedHash: roundContext.serverSeedHash,
       status: ROUND_STATUS.WAITING,
+      recovered: Boolean(recoveredRound),
     });
 
     await this.wait(this.options.startDelayMs);
@@ -141,28 +133,32 @@ class CrashEngine {
     }
 
     await this.persistState({
-      roundId,
+      roundId: roundContext.roundId,
       multiplier: 1,
-      crashPoint,
+      crashPoint: roundContext.crashPoint,
+      serverSeed: roundContext.serverSeed,
+      serverSeedHash: roundContext.serverSeedHash,
+      clientSeed: roundContext.clientSeed,
+      nonce: roundContext.nonce,
       status: ROUND_STATUS.RUNNING,
       startedAt: Date.now(),
       updatedAt: Date.now(),
     });
 
     this.emit(CRASH_EVENTS.START, {
-      roundId,
+      roundId: roundContext.roundId,
       multiplier: 1,
       status: ROUND_STATUS.RUNNING,
     });
 
     await this.runHook("onRoundStart", {
-      roundId,
+      roundId: roundContext.roundId,
       multiplier: 1,
-      crashPoint,
+      crashPoint: roundContext.crashPoint,
       status: ROUND_STATUS.RUNNING,
     });
 
-    await this.runTickLoop(roundId, crashPoint);
+    await this.runTickLoop(roundContext.roundId, roundContext.crashPoint);
   }
 
   runTickLoop(roundId, crashPoint) {
@@ -207,14 +203,14 @@ class CrashEngine {
               status: ROUND_STATUS.CRASHED,
             });
 
-            const fairState = await this.getFairState();
-            if (fairState?.roundId === roundId && fairState?.serverSeed) {
+            const roundState = await this.getState();
+            if (roundState?.roundId === roundId && roundState?.serverSeed) {
               this.emit(CRASH_EVENTS.SEED_REVEAL, {
                 roundId,
-                nonce: fairState.nonce,
-                clientSeed: fairState.clientSeed,
-                serverSeed: fairState.serverSeed,
-                serverSeedHash: fairState.serverSeedHash,
+                nonce: roundState.nonce,
+                clientSeed: roundState.clientSeed,
+                serverSeed: roundState.serverSeed,
+                serverSeedHash: roundState.serverSeedHash,
               });
             }
 
@@ -258,17 +254,11 @@ class CrashEngine {
     return roundToTwo(current * (1 + growthRate));
   }
 
-  generateCrashPoint() {
+  generateCrashPointFromRound(roundState) {
     const { minCrashPoint, maxCrashPoint } = this.options;
-    const random = minCrashPoint + Math.random() * (maxCrashPoint - minCrashPoint);
-    return roundToTwo(random);
-  }
-
-  generateCrashPointFromFairState(fairState) {
-    const { minCrashPoint, maxCrashPoint } = this.options;
-    const message = `${fairState.clientSeed}:${fairState.nonce}`;
+    const message = `${roundState.clientSeed}:${roundState.nonce}`;
     const hmacHex = crypto
-      .createHmac("sha256", fairState.serverSeed)
+      .createHmac("sha256", roundState.serverSeed)
       .update(message)
       .digest("hex");
 
@@ -291,17 +281,15 @@ class CrashEngine {
   }
 
   async persistState(nextState) {
-    const normalized = {
+    const normalized = this.normalizeRoundState({
       ...this.currentState,
       ...nextState,
-      multiplier: roundToTwo(Number(nextState.multiplier ?? this.currentState.multiplier ?? 1)),
-      crashPoint: roundToTwo(Number(nextState.crashPoint ?? this.currentState.crashPoint ?? 1.2)),
-    };
+    });
 
     this.currentState = normalized;
 
     try {
-      await redis.set(CRASH_STATE_KEY, JSON.stringify(normalized));
+      await redis.set(CRASH_CURRENT_ROUND_KEY, JSON.stringify(normalized));
     } catch (error) {
       // keep in-memory state as fallback even if Redis fails
     }
@@ -322,69 +310,147 @@ class CrashEngine {
     });
   }
 
-  async hydrateFairState() {
+  async hydrateCurrentRoundState() {
     try {
-      const fromRedis = await redis.get(CRASH_FAIR_STATE_KEY);
+      const fromRedis = await redis.get(CRASH_CURRENT_ROUND_KEY);
       if (!fromRedis) {
         return;
       }
 
       const parsed = JSON.parse(fromRedis);
-      if (typeof parsed?.nonce === "number" && Number.isFinite(parsed.nonce)) {
-        this.currentFairState = {
-          ...this.currentFairState,
-          ...parsed,
-          nonce: Math.max(0, Math.trunc(parsed.nonce)),
-        };
-      }
+      this.currentState = this.normalizeRoundState({
+        ...this.currentState,
+        ...parsed,
+      });
+      this.lastNonce = Math.max(0, Number(this.currentState.nonce) || 0);
     } catch (error) {
       // fallback to in-memory defaults
     }
   }
 
-  async getFairState() {
-    try {
-      const fromRedis = await redis.get(CRASH_FAIR_STATE_KEY);
-      if (!fromRedis) {
-        return this.currentFairState;
-      }
-
-      const parsed = JSON.parse(fromRedis);
-      this.currentFairState = {
-        ...this.currentFairState,
-        ...parsed,
-      };
-
-      return this.currentFairState;
-    } catch (error) {
-      return this.currentFairState;
-    }
-  }
-
-  async createRoundFairState(roundId) {
-    const nextNonce = Number(this.currentFairState?.nonce || 0) + 1;
+  createNewRoundContext() {
+    const roundId = `${Date.now()}-${++this.roundCounter}`;
+    const nextNonce = this.lastNonce + 1;
     const serverSeed = crypto.randomBytes(32).toString("hex");
     const serverSeedHash = crypto.createHash("sha256").update(serverSeed).digest("hex");
+    const clientSeed = this.options.defaultClientSeed;
 
-    const fairState = {
+    const roundContext = this.normalizeRoundState({
       roundId,
+      multiplier: 1,
+      crashPoint: 1.2,
       serverSeed,
       serverSeedHash,
-      clientSeed: this.options.defaultClientSeed,
+      clientSeed,
       nonce: nextNonce,
+      startedAt: Date.now(),
+      status: ROUND_STATUS.WAITING,
       updatedAt: Date.now(),
+    });
+
+    roundContext.crashPoint = this.generateCrashPointFromRound(roundContext);
+    this.lastNonce = nextNonce;
+    return roundContext;
+  }
+
+  normalizeRoundState(state) {
+    const normalizedNonce = Math.max(0, Math.trunc(Number(state?.nonce ?? 0) || 0));
+
+    return {
+      ...this.currentState,
+      ...state,
+      status: [ROUND_STATUS.WAITING, ROUND_STATUS.RUNNING, ROUND_STATUS.CRASHED].includes(state?.status)
+        ? state.status
+        : this.currentState.status,
+      multiplier: roundToTwo(Number(state?.multiplier ?? this.currentState.multiplier ?? 1)),
+      crashPoint: roundToTwo(Number(state?.crashPoint ?? this.currentState.crashPoint ?? 1.2)),
+      serverSeed: state?.serverSeed ?? this.currentState.serverSeed ?? null,
+      serverSeedHash: state?.serverSeedHash ?? this.currentState.serverSeedHash ?? null,
+      clientSeed: state?.clientSeed || this.currentState.clientSeed || this.options.defaultClientSeed,
+      nonce: normalizedNonce,
+      startedAt: typeof state?.startedAt === "number" ? state.startedAt : this.currentState.startedAt ?? null,
+      updatedAt: typeof state?.updatedAt === "number" ? state.updatedAt : Date.now(),
     };
+  }
 
-    this.currentFairState = fairState;
-
-    try {
-      await redis.set(CRASH_FAIR_STATE_KEY, JSON.stringify(fairState));
-    } catch (error) {
-      // fallback to in-memory state only
+  async recoverRoundOnStartup() {
+    const state = await this.getState();
+    if (!state?.roundId) {
+      return;
     }
 
-    return fairState;
+    this.lastNonce = Math.max(this.lastNonce, Number(state.nonce) || 0);
+
+    if (state.status === ROUND_STATUS.RUNNING) {
+      const recoveredMultiplier = state.crashPoint || state.multiplier || 1;
+      const recoveredState = this.normalizeRoundState({
+        ...state,
+        status: ROUND_STATUS.CRASHED,
+        multiplier: recoveredMultiplier,
+        crashedAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+
+      await this.persistState(recoveredState);
+
+      this.emit(CRASH_EVENTS.END, {
+        roundId: recoveredState.roundId,
+        multiplier: recoveredState.multiplier,
+        status: ROUND_STATUS.CRASHED,
+        recovered: true,
+      });
+
+      if (recoveredState.serverSeed) {
+        this.emit(CRASH_EVENTS.SEED_REVEAL, {
+          roundId: recoveredState.roundId,
+          nonce: recoveredState.nonce,
+          clientSeed: recoveredState.clientSeed,
+          serverSeed: recoveredState.serverSeed,
+          serverSeedHash: recoveredState.serverSeedHash,
+          recovered: true,
+        });
+      }
+
+      await this.runHook("onRoundCrash", {
+        roundId: recoveredState.roundId,
+        multiplier: recoveredState.multiplier,
+        crashPoint: recoveredState.crashPoint,
+        status: ROUND_STATUS.CRASHED,
+        recovered: true,
+      });
+      return;
+    }
+
+    if (state.status === ROUND_STATUS.WAITING) {
+      const hasRecoverableFairState =
+        typeof state.serverSeed === "string" &&
+        state.serverSeed.length > 0 &&
+        typeof state.serverSeedHash === "string" &&
+        state.serverSeedHash.length > 0 &&
+        Number(state.nonce) > 0;
+
+      if (!hasRecoverableFairState) {
+        return;
+      }
+
+      this.recoveredWaitingRound = this.normalizeRoundState({
+        ...state,
+        status: ROUND_STATUS.WAITING,
+        startedAt: typeof state.startedAt === "number" ? state.startedAt : Date.now(),
+        updatedAt: Date.now(),
+      });
+
+      this.emit(CRASH_EVENTS.SEED_HASH, {
+        roundId: this.recoveredWaitingRound.roundId,
+        nonce: this.recoveredWaitingRound.nonce,
+        clientSeed: this.recoveredWaitingRound.clientSeed,
+        serverSeedHash: this.recoveredWaitingRound.serverSeedHash,
+        status: ROUND_STATUS.WAITING,
+        recovered: true,
+      });
+    }
   }
+
 
   async runHook(hookName, payload) {
     const hook = this.hooks?.[hookName];
