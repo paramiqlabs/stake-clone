@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useCrashGame } from "@/hooks/useCrashGame";
 import { useBetHistory } from "@/hooks/useBetHistory";
 import { useWallet } from "@/hooks/useWallet";
@@ -21,6 +21,8 @@ export function CrashGamePanel({ slug, gameId }) {
     isCashingOut,
     isCrashed,
     lastMessage,
+    serverSeedHash,
+    revealedSeed,
     connected,
     reconnecting,
     placeCrashBet,
@@ -33,11 +35,39 @@ export function CrashGamePanel({ slug, gameId }) {
     onCashoutSuccess,
     onCrashEnd,
   });
+  const [verifyResult, setVerifyResult] = useState("");
+  const [isVerifying, setIsVerifying] = useState(false);
 
   const multiplierDisplay = useMemo(
     () => `${Number(currentMultiplier || 1).toFixed(2)}x`,
     [currentMultiplier]
   );
+
+  useEffect(() => {
+    setVerifyResult("");
+  }, [serverSeedHash, revealedSeed?.serverSeed, revealedSeed?.nonce, revealedSeed?.clientSeed]);
+
+  const verifyProvablyFair = useCallback(async () => {
+    if (!serverSeedHash || !revealedSeed?.serverSeed) {
+      setVerifyResult("Invalid");
+      return;
+    }
+
+    setIsVerifying(true);
+    try {
+      const encoded = new TextEncoder().encode(revealedSeed.serverSeed);
+      const digest = await window.crypto.subtle.digest("SHA-256", encoded);
+      const digestHex = Array.from(new Uint8Array(digest))
+        .map((byte) => byte.toString(16).padStart(2, "0"))
+        .join("");
+
+      setVerifyResult(digestHex === serverSeedHash ? "Valid" : "Invalid");
+    } catch {
+      setVerifyResult("Invalid");
+    } finally {
+      setIsVerifying(false);
+    }
+  }, [revealedSeed?.serverSeed, serverSeedHash]);
 
   if (slug !== "crash") {
     return (
@@ -78,6 +108,17 @@ export function CrashGamePanel({ slug, gameId }) {
       <p>Bet placed: {hasPlacedBet ? "Yes" : "No"}</p>
       <p>Cashed out: {hasCashedOut ? "Yes" : "No"}</p>
       {lastMessage ? <p>{lastMessage}</p> : null}
+      <section>
+        <h2>Provably Fair</h2>
+        <p>Server Seed Hash: {serverSeedHash || "-"}</p>
+        <p>Server Seed: {revealedSeed?.serverSeed || "-"}</p>
+        <p>Nonce: {revealedSeed?.nonce || "-"}</p>
+        <p>Client Seed: {revealedSeed?.clientSeed || "stake-clone-client-seed"}</p>
+        <button type="button" onClick={verifyProvablyFair} disabled={!serverSeedHash || !revealedSeed?.serverSeed || isVerifying}>
+          {isVerifying ? "Verifying..." : "Verify"}
+        </button>
+        {verifyResult ? <p>{verifyResult}</p> : null}
+      </section>
       <h2>My Bets</h2>
       {historyLoading ? <p>Loading bet history...</p> : null}
       {historyError ? <p>{historyError}</p> : null}

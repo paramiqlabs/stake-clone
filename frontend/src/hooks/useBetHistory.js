@@ -80,7 +80,11 @@ export const useBetHistory = ({ maxEntries = 20 } = {}) => {
   const onCashoutSuccess = useCallback(
     (payload) => {
       const roundId = payload?.roundId ? String(payload.roundId) : null;
-      const betId = payload?.bet?.id ? String(payload.bet.id) : null;
+      const betId = payload?.bet?.id
+        ? String(payload.bet.id)
+        : payload?.betId
+          ? String(payload.betId)
+          : null;
 
       setBets((current) => {
         const updated = current.map((entry) => {
@@ -99,6 +103,8 @@ export const useBetHistory = ({ maxEntries = 20 } = {}) => {
             cashoutMultiplier:
               payload?.cashoutMultiplier !== undefined && payload?.cashoutMultiplier !== null
                 ? String(payload.cashoutMultiplier)
+                : payload?.multiplier !== undefined && payload?.multiplier !== null
+                  ? String(payload.multiplier)
                 : entry.cashoutMultiplier,
           };
         });

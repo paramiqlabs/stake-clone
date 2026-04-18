@@ -10,6 +10,7 @@ const CRASH_PLACE_BET_EVENT = "crash_bet";
 const CRASH_CASHOUT_EVENT = "crash_cashout";
 const BET_PLACED_EVENT = "bet_placed";
 const CASHOUT_SUCCESS_EVENT = "cashout_success";
+const CASHOUT_ERROR_EVENT = "cashout_error";
 const CRASH_RESULT_EVENT = "crash_result";
 const SOCKET_ERROR_EVENT = "socket_error";
 
@@ -53,7 +54,6 @@ const setupCrashSocket = async (io) => {
         multiplier: state.multiplier,
         status: state.status,
       });
-      return;
     }
 
     if (state.status === ROUND_STATUS.CRASHED) {
@@ -86,25 +86,64 @@ const setupCrashSocket = async (io) => {
       }
     });
 
-    socket.on(CRASH_CASHOUT_EVENT, async () => {
+    socket.on(CRASH_CASHOUT_EVENT, async (data = {}) => {
+      console.log("cashout received", data, socket.user);
       try {
+        const betId = data?.betId;
+        if (!betId) {
+          console.log("no betId");
+          socket.emit(CASHOUT_ERROR_EVENT, { message: "no betId" });
+          return;
+        }
+
         const roundState = await engine.getState();
+        if (roundState?.status !== ROUND_STATUS.RUNNING) {
+          console.log("round ended");
+          socket.emit(CASHOUT_ERROR_EVENT, { message: "round ended" });
+          return;
+        }
+
         const result = await cashoutCrashBet({
           authUserId: socket.user.id,
           roundState,
+          betId,
         });
-
-        socket.emit(CASHOUT_SUCCESS_EVENT, result);
+        console.log("cashout success", {
+          betId: result.bet.id,
+          payout: result.payout,
+          multiplier: result.cashoutMultiplier,
+          newBalance: result.wallet.balance,
+        });
+        socket.emit(CASHOUT_SUCCESS_EVENT, {
+          betId: result.bet.id,
+          payout: result.payout,
+          multiplier: result.cashoutMultiplier,
+          newBalance: result.wallet.balance,
+          roundId: result.roundId,
+          status: result.bet.status,
+          userId: result.bet.userId,
+        });
         io.emit(CASHOUT_SUCCESS_EVENT, {
+          betId: result.bet.id,
           roundId: result.roundId,
           userId: result.bet.userId,
           payout: result.payout,
-          cashoutMultiplier: result.cashoutMultiplier,
+          multiplier: result.cashoutMultiplier,
+          newBalance: result.wallet.balance,
           status: result.bet.status,
         });
       } catch (error) {
-        const mapped = mapCrashError(error);
-        socket.emit(mapped.event, { status: mapped.status, message: mapped.message });
+        const message = error?.message || "Cashout failed";
+        if (message === "no betId") {
+          console.log("no betId");
+        } else if (message === "bet not found") {
+          console.log("bet not found");
+        } else if (message === "already cashed out") {
+          console.log("already cashed out");
+        } else if (message === "round ended") {
+          console.log("round ended");
+        }
+        socket.emit(CASHOUT_ERROR_EVENT, { message });
       }
     });
   });

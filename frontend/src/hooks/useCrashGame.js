@@ -3,8 +3,9 @@
 import { useCallback, useMemo, useState } from "react";
 import { getSocket } from "@/lib/socket";
 import { useSocket } from "@/hooks/useSocket";
-import { placeBet } from "@/services/bet.service";
 import { useAuthStore } from "@/store/useAuthStore";
+
+const DEFAULT_CLIENT_SEED = "stake-clone-client-seed";
 
 export const useCrashGame = ({
   gameId,
@@ -26,6 +27,9 @@ export const useCrashGame = ({
   const [isCashingOut, setIsCashingOut] = useState(false);
   const [isCrashed, setIsCrashed] = useState(false);
   const [lastMessage, setLastMessage] = useState("");
+  const [currentBetId, setCurrentBetId] = useState("");
+  const [serverSeedHash, setServerSeedHash] = useState("");
+  const [revealedSeed, setRevealedSeed] = useState(null);
 
   const socketEvents = useMemo(
     () => ({
@@ -34,10 +38,54 @@ export const useCrashGame = ({
         setCurrentMultiplier(Number(payload?.multiplier || 1));
         setIsCrashed(false);
         setIsCashingOut(false);
+        setRevealedSeed(null);
+      },
+      crash_seed_hash: (payload) => {
+        setServerSeedHash(String(payload?.serverSeedHash || ""));
+        setRevealedSeed(null);
+      },
+      crash_seed_reveal: (payload) => {
+        const nextHash = String(payload?.serverSeedHash || "");
+        if (nextHash) {
+          setServerSeedHash(nextHash);
+        }
+
+        setRevealedSeed({
+          serverSeed: String(payload?.serverSeed || ""),
+          nonce: payload?.nonce !== undefined && payload?.nonce !== null ? String(payload.nonce) : "",
+          clientSeed: String(payload?.clientSeed || DEFAULT_CLIENT_SEED),
+        });
       },
       crash_tick: (payload) => {
         setStatus(payload?.status || "running");
         setCurrentMultiplier(Number(payload?.multiplier || 1));
+      },
+      bet_placed: async (payload) => {
+        const directBet = payload?.bet || null;
+        const directUserId = directBet?.userId;
+        const broadcastUserId = payload?.userId;
+        const eventUserId = directUserId || broadcastUserId;
+
+        if (!eventUserId || String(eventUserId) !== String(userId || "")) {
+          return;
+        }
+
+        setHasPlacedBet(true);
+        setHasCashedOut(false);
+        setIsPlacingBet(false);
+
+        if (directBet?.id) {
+          setCurrentBetId(String(directBet.id));
+          onBetPlaced?.(directBet);
+        }
+
+        if (payload?.wallet?.balance !== undefined) {
+          onWalletBalance?.(payload.wallet.balance);
+        } else {
+          await onWalletRefresh?.();
+        }
+
+        setLastMessage("Bet placed");
       },
       cashout_success: async (payload) => {
         const isBroadcastPayload = payload?.userId !== undefined && payload?.userId !== null;
@@ -45,14 +93,13 @@ export const useCrashGame = ({
           return;
         }
 
-        if (isBroadcastPayload && payload?.wallet === undefined && payload?.bet === undefined) {
-          return;
-        }
-
         setHasCashedOut(true);
         setIsCashingOut(false);
+        setCurrentBetId("");
 
-        if (payload?.wallet?.balance !== undefined) {
+        if (payload?.newBalance !== undefined) {
+          onWalletBalance?.(payload.newBalance);
+        } else if (payload?.wallet?.balance !== undefined) {
           onWalletBalance?.(payload.wallet.balance);
         } else {
           await onWalletRefresh?.();
@@ -61,6 +108,11 @@ export const useCrashGame = ({
         setLastMessage(payload?.payout ? `Cashout success: ${payload.payout}` : "Cashout successful");
         onCashoutSuccess?.(payload);
       },
+      cashout_error: (payload) => {
+        console.error("cashout_error", payload);
+        setIsCashingOut(false);
+        setLastMessage(payload?.message || "Cashout failed");
+      },
       crash_end: (payload) => {
         setStatus("crashed");
         setCurrentMultiplier(1);
@@ -68,14 +120,17 @@ export const useCrashGame = ({
         setHasCashedOut(false);
         setIsCashingOut(false);
         setIsCrashed(true);
+        setCurrentBetId("");
         onCrashEnd?.(payload);
       },
       socket_error: (payload) => {
+        console.error("socket_error", payload);
+        setIsPlacingBet(false);
         setIsCashingOut(false);
         setLastMessage(payload?.message || "Socket error");
       },
     }),
-    [onCrashEnd, onCashoutSuccess, onWalletBalance, onWalletRefresh, userId]
+    [onBetPlaced, onCrashEnd, onCashoutSuccess, onWalletBalance, onWalletRefresh, userId]
   );
 
   const { connected, reconnecting } = useSocket({ token, events: socketEvents });
@@ -96,34 +151,19 @@ export const useCrashGame = ({
       return;
     }
 
+    const socket = getSocket();
+    if (!socket) {
+      setLastMessage("Socket not connected");
+      return;
+    }
+
     setIsPlacingBet(true);
     setLastMessage("");
-
-    try {
-      const result = await placeBet({
-        gameId,
-        amount: normalizedAmount,
-      });
-
-      setHasPlacedBet(true);
-      setHasCashedOut(false);
-      onBetPlaced?.(result?.bet);
-
-      if (result?.wallet?.balance !== undefined) {
-        onWalletBalance?.(result.wallet.balance);
-      } else {
-        await onWalletRefresh?.();
-      }
-
-      setLastMessage("Bet placed");
-    } catch (error) {
-      setLastMessage(error?.message || "Failed to place bet");
-    } finally {
-      setIsPlacingBet(false);
-    }
-  }, [betAmount, gameId, hasPlacedBet, isPlacingBet, onBetPlaced, onWalletBalance, onWalletRefresh]);
+    socket.emit("crash_bet", { amount: normalizedAmount });
+  }, [betAmount, gameId, hasPlacedBet, isPlacingBet]);
 
   const cashout = useCallback(() => {
+    console.log("cashout click", { currentBetId, hasPlacedBet, hasCashedOut, isCrashed, isCashingOut });
     if (!hasPlacedBet || hasCashedOut || isCrashed || isCashingOut) {
       return;
     }
@@ -135,8 +175,10 @@ export const useCrashGame = ({
     }
 
     setIsCashingOut(true);
-    socket.emit("crash_cashout");
-  }, [hasPlacedBet, hasCashedOut, isCrashed, isCashingOut]);
+    const payload = { betId: currentBetId };
+    console.log('socket.emit("crash_cashout")', payload);
+    socket.emit("crash_cashout", payload);
+  }, [currentBetId, hasPlacedBet, hasCashedOut, isCrashed, isCashingOut]);
 
   return {
     status,
@@ -148,7 +190,10 @@ export const useCrashGame = ({
     isPlacingBet,
     isCashingOut,
     isCrashed,
+    currentBetId,
     lastMessage,
+    serverSeedHash,
+    revealedSeed,
     connected,
     reconnecting,
     placeCrashBet,

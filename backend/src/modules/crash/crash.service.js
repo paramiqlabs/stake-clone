@@ -209,13 +209,18 @@ const placeCrashBet = async ({ authUserId, amount, roundState }) => {
   }
 };
 
-const cashoutCrashBet = async ({ authUserId, roundState }) => {
+const cashoutCrashBet = async ({ authUserId, roundState, betId }) => {
+  if (!betId) {
+    throw new Error("no betId");
+  }
+
   if (roundState?.status !== "running") {
-    throw new Error("Round is not running");
+    throw new Error("round ended");
   }
 
   const roundId = parseRoundId(roundState?.roundId);
   const userId = parseUnsignedBigInt(authUserId, "user id");
+  const normalizedBetId = parseUnsignedBigInt(betId, "bet id");
   const currentMultiplier = toTwoDecimal(roundState?.multiplier ?? "0");
 
   if (currentMultiplier.lte(1)) {
@@ -225,18 +230,30 @@ const cashoutCrashBet = async ({ authUserId, roundState }) => {
   const result = await prisma.$transaction(async (tx) => {
     const crashGameId = await ensureCrashGameId(tx);
 
-    const bet = await tx.bet.findFirst({
+    const bet = await tx.bet.findUnique({
       where: {
-        userId,
-        gameId: crashGameId,
-        crashRoundId: roundId,
-        status: BET_STATUS_PENDING,
+        id: normalizedBetId,
       },
-      orderBy: { id: "desc" },
     });
 
     if (!bet) {
-      throw new Error("No pending crash bet found");
+      throw new Error("bet not found");
+    }
+
+    if (bet.userId.toString() !== userId.toString()) {
+      throw new Error("bet not found");
+    }
+
+    if (bet.gameId.toString() !== crashGameId.toString()) {
+      throw new Error("bet not found");
+    }
+
+    if (String(bet.status || "").toLowerCase() !== BET_STATUS_PENDING) {
+      throw new Error("already cashed out");
+    }
+
+    if (!bet.crashRoundId || String(bet.crashRoundId) !== String(roundId)) {
+      throw new Error("round ended");
     }
 
     const payout = toTwoDecimal(bet.amount.mul(currentMultiplier));
@@ -256,7 +273,7 @@ const cashoutCrashBet = async ({ authUserId, roundState }) => {
     });
 
     if (updated.count !== 1) {
-      throw new Error("Bet is already resolved");
+      throw new Error("already cashed out");
     }
 
     const wallet = await tx.wallet.findUnique({ where: { userId } });
@@ -353,8 +370,12 @@ const mapCrashError = (error) => {
     message.includes("amount must be greater than 0") ||
     message.includes("Betting is closed") ||
     message.includes("Round is not running") ||
+    message.includes("round ended") ||
     message.includes("Cashout is not available yet") ||
     message.includes("No pending crash bet found") ||
+    message.includes("no betId") ||
+    message.includes("bet not found") ||
+    message.includes("already cashed out") ||
     message.includes("Bet is already resolved") ||
     message.includes("Bet already placed for current round") ||
     message.includes("Insufficient balance") ||
