@@ -1,89 +1,36 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { getSocket } from "@/lib/socket";
-import { useSocket } from "@/hooks/useSocket";
-import { useAuthStore } from "@/store/useAuthStore";
+import { useMemo } from "react";
+import { useCrashGame } from "@/hooks/useCrashGame";
+import { useWallet } from "@/hooks/useWallet";
 
-export function CrashGamePanel({ slug }) {
-  const token = useAuthStore((state) => state.token);
-  const walletBalance = useAuthStore((state) => state.walletBalance);
-  const setWalletBalance = useAuthStore((state) => state.setWalletBalance);
-
-  const [status, setStatus] = useState("waiting");
-  const [multiplier, setMultiplier] = useState(1);
-  const [betAmount, setBetAmount] = useState("1");
-  const [lastMessage, setLastMessage] = useState("");
-  const [roundResult, setRoundResult] = useState(null);
-
-  const socketEvents = useMemo(
-    () => ({
-      crash_start: (payload) => {
-        setStatus(payload?.status || "running");
-        setMultiplier(Number(payload?.multiplier || 1));
-        setRoundResult(null);
-      },
-      crash_tick: (payload) => {
-        setStatus(payload?.status || "running");
-        setMultiplier(Number(payload?.multiplier || 1));
-      },
-      crash_end: (payload) => {
-        setStatus(payload?.status || "crashed");
-        setMultiplier(Number(payload?.multiplier || 1));
-        setLastMessage(`Round ended at ${Number(payload?.multiplier || 1).toFixed(2)}x`);
-      },
-      bet_placed: (payload) => {
-        if (payload?.wallet?.balance !== undefined) {
-          setWalletBalance(payload.wallet.balance);
-        }
-        setLastMessage("Bet placed");
-      },
-      cashout_success: (payload) => {
-        if (payload?.wallet?.balance !== undefined) {
-          setWalletBalance(payload.wallet.balance);
-        }
-        if (payload?.payout) {
-          setLastMessage(`Cashout success: ${payload.payout}`);
-        }
-      },
-      crash_result: (payload) => {
-        setRoundResult(payload);
-      },
-      socket_error: (payload) => {
-        setLastMessage(payload?.message || "Socket error");
-      },
-    }),
-    [setWalletBalance]
-  );
-
-  const { connected, reconnecting } = useSocket({
-    token,
-    events: socketEvents,
+export function CrashGamePanel({ slug, gameId }) {
+  const { balance: walletBalance, updateBalance, refreshBalance } = useWallet();
+  const {
+    status,
+    currentMultiplier,
+    hasPlacedBet,
+    hasCashedOut,
+    betAmount,
+    setBetAmount,
+    isPlacingBet,
+    isCashingOut,
+    isCrashed,
+    lastMessage,
+    connected,
+    reconnecting,
+    placeCrashBet,
+    cashout,
+  } = useCrashGame({
+    gameId,
+    onWalletBalance: updateBalance,
+    onWalletRefresh: refreshBalance,
   });
 
-  const multiplierDisplay = useMemo(() => `${Number(multiplier || 1).toFixed(2)}x`, [multiplier]);
-
-  const placeCrashBet = () => {
-    const socket = getSocket();
-    if (!socket) {
-      setLastMessage("Socket not connected");
-      return;
-    }
-
-    socket.emit("crash_bet", {
-      amount: betAmount,
-    });
-  };
-
-  const cashout = () => {
-    const socket = getSocket();
-    if (!socket) {
-      setLastMessage("Socket not connected");
-      return;
-    }
-
-    socket.emit("crash_cashout");
-  };
+  const multiplierDisplay = useMemo(
+    () => `${Number(currentMultiplier || 1).toFixed(2)}x`,
+    [currentMultiplier]
+  );
 
   if (slug !== "crash") {
     return (
@@ -110,25 +57,20 @@ export function CrashGamePanel({ slug }) {
           step="0.01"
           value={betAmount}
           onChange={(event) => setBetAmount(event.target.value)}
+          disabled={hasPlacedBet || isPlacingBet}
         />
       </div>
       <div>
-        <button type="button" onClick={placeCrashBet}>
-          Place Bet
+        <button type="button" onClick={placeCrashBet} disabled={hasPlacedBet || isPlacingBet}>
+          {isPlacingBet ? "Placing..." : "Place Bet"}
         </button>
-        <button type="button" onClick={cashout}>
-          Cash Out
+        <button type="button" onClick={cashout} disabled={!hasPlacedBet || hasCashedOut || isCrashed || isCashingOut}>
+          {isCashingOut ? "Cashing out..." : "Cashout"}
         </button>
       </div>
+      <p>Bet placed: {hasPlacedBet ? "Yes" : "No"}</p>
+      <p>Cashed out: {hasCashedOut ? "Yes" : "No"}</p>
       {lastMessage ? <p>{lastMessage}</p> : null}
-      {roundResult ? (
-        <div>
-          <p>Round Result</p>
-          <p>Final: {roundResult.finalMultiplier}x</p>
-          <p>Won bets: {roundResult.wonCount}</p>
-          <p>Lost bets: {roundResult.lostCount}</p>
-        </div>
-      ) : null}
     </section>
   );
 }

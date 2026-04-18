@@ -41,7 +41,7 @@ export default function GameSlugPage({ params }: { params: Promise<{ slug: strin
       <Link href="/dashboard">Back to Dashboard</Link>
       {loading ? <p>Loading game...</p> : null}
       {!loading ? <p>Game: {game?.name || slug}</p> : null}
-      <CrashGamePanel slug={slug} />
+      <CrashGamePanel slug={slug} gameId={game?.id || null} />
     </div>
   );
 }
