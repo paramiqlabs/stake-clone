@@ -24,6 +24,10 @@ export const connectSocket = (token) => {
   socketInstance = io(SOCKET_URL, {
     autoConnect: false,
     transports: ["websocket"],
+    reconnection: true,
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 5000,
     auth: { token },
   });
 
@@ -42,4 +46,3 @@ export const disconnectSocket = () => {
   socketInstance = null;
   socketToken = null;
 };
-

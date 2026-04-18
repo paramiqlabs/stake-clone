@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { getSocket } from "@/lib/socket";
-import { useCrashSocket } from "@/hooks/useCrashSocket";
+import { useSocket } from "@/hooks/useSocket";
 import { useAuthStore } from "@/store/useAuthStore";
 
 export function CrashGamePanel({ slug }) {
@@ -16,41 +16,49 @@ export function CrashGamePanel({ slug }) {
   const [lastMessage, setLastMessage] = useState("");
   const [roundResult, setRoundResult] = useState(null);
 
-  const { connected } = useCrashSocket(token, {
-    onCrashStart: (payload) => {
-      setStatus(payload?.status || "running");
-      setMultiplier(Number(payload?.multiplier || 1));
-      setRoundResult(null);
-    },
-    onCrashTick: (payload) => {
-      setStatus(payload?.status || "running");
-      setMultiplier(Number(payload?.multiplier || 1));
-    },
-    onCrashEnd: (payload) => {
-      setStatus(payload?.status || "crashed");
-      setMultiplier(Number(payload?.multiplier || 1));
-      setLastMessage(`Round ended at ${Number(payload?.multiplier || 1).toFixed(2)}x`);
-    },
-    onBetPlaced: (payload) => {
-      if (payload?.wallet?.balance !== undefined) {
-        setWalletBalance(payload.wallet.balance);
-      }
-      setLastMessage("Bet placed");
-    },
-    onCashoutSuccess: (payload) => {
-      if (payload?.wallet?.balance !== undefined) {
-        setWalletBalance(payload.wallet.balance);
-      }
-      if (payload?.payout) {
-        setLastMessage(`Cashout success: ${payload.payout}`);
-      }
-    },
-    onCrashResult: (payload) => {
-      setRoundResult(payload);
-    },
-    onSocketError: (payload) => {
-      setLastMessage(payload?.message || "Socket error");
-    },
+  const socketEvents = useMemo(
+    () => ({
+      crash_start: (payload) => {
+        setStatus(payload?.status || "running");
+        setMultiplier(Number(payload?.multiplier || 1));
+        setRoundResult(null);
+      },
+      crash_tick: (payload) => {
+        setStatus(payload?.status || "running");
+        setMultiplier(Number(payload?.multiplier || 1));
+      },
+      crash_end: (payload) => {
+        setStatus(payload?.status || "crashed");
+        setMultiplier(Number(payload?.multiplier || 1));
+        setLastMessage(`Round ended at ${Number(payload?.multiplier || 1).toFixed(2)}x`);
+      },
+      bet_placed: (payload) => {
+        if (payload?.wallet?.balance !== undefined) {
+          setWalletBalance(payload.wallet.balance);
+        }
+        setLastMessage("Bet placed");
+      },
+      cashout_success: (payload) => {
+        if (payload?.wallet?.balance !== undefined) {
+          setWalletBalance(payload.wallet.balance);
+        }
+        if (payload?.payout) {
+          setLastMessage(`Cashout success: ${payload.payout}`);
+        }
+      },
+      crash_result: (payload) => {
+        setRoundResult(payload);
+      },
+      socket_error: (payload) => {
+        setLastMessage(payload?.message || "Socket error");
+      },
+    }),
+    [setWalletBalance]
+  );
+
+  const { connected, reconnecting } = useSocket({
+    token,
+    events: socketEvents,
   });
 
   const multiplierDisplay = useMemo(() => `${Number(multiplier || 1).toFixed(2)}x`, [multiplier]);
@@ -89,9 +97,9 @@ export function CrashGamePanel({ slug }) {
   return (
     <section>
       <h1>Crash Game</h1>
-      <p>Socket: {connected ? "Connected" : "Disconnected"}</p>
+      <p>Socket: {connected ? "Connected" : reconnecting ? "Reconnecting..." : "Disconnected"}</p>
       <p>Status: {status}</p>
-      <p>Multiplier: {multiplierDisplay}</p>
+      <p style={{ fontSize: "64px", fontWeight: "700", margin: "10px 0" }}>{multiplierDisplay}</p>
       <p>Wallet Balance: {walletBalance}</p>
       <div>
         <label htmlFor="bet-amount">Bet amount</label>
@@ -124,4 +132,3 @@ export function CrashGamePanel({ slug }) {
     </section>
   );
 }
-

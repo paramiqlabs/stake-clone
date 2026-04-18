@@ -5,3 +5,7 @@ export const fetchGames = async () => {
   return payload?.data || [];
 };
 
+export const fetchGameBySlug = async (slug) => {
+  const games = await fetchGames();
+  return games.find((game) => game.slug === slug) || null;
+};
