@@ -186,7 +186,38 @@ const resolveBet = async (betIdParam, payload) => {
   };
 };
 
+const toHistoryBetResponse = (bet) => ({
+  id: bet.id.toString(),
+  amount: bet.amount.toString(),
+  payout: bet.payout ? bet.payout.toString() : null,
+  status: bet.status,
+  crashRoundId: bet.crashRoundId || null,
+  cashoutMultiplier: bet.cashoutMultiplier ? bet.cashoutMultiplier.toString() : null,
+  createdAt: bet.createdAt,
+});
+
+const getMyBets = async (authUserId, options = {}) => {
+  const userId = parseUnsignedBigInt(authUserId, "user id");
+  const take = Math.max(1, Math.min(Number(options.limit) || 20, 20));
+
+  const bets = await prisma.bet.findMany({
+    where: {
+      userId,
+      crashRoundId: {
+        not: null,
+      },
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+    take,
+  });
+
+  return bets.map(toHistoryBetResponse);
+};
+
 module.exports = {
   placeBet,
   resolveBet,
+  getMyBets,
 };

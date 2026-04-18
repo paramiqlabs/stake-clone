@@ -42,7 +42,20 @@ const resolveBet = async (req, res) => {
   }
 };
 
+const getMyBets = async (req, res) => {
+  try {
+    const limit = req.query?.limit;
+    const data = await betService.getMyBets(req.user.id, { limit });
+    return res.status(200).json({ success: true, data });
+  } catch (error) {
+    const message = error?.message || "Internal server error";
+    const status = isBadRequestError(message) ? 400 : 500;
+    return res.status(status).json({ success: false, message });
+  }
+};
+
 module.exports = {
   placeBet,
   resolveBet,
+  getMyBets,
 };
