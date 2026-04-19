@@ -2,7 +2,6 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
-import { CrashGamePanel } from "@/components/CrashGamePanel";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 import { fetchGameBySlug } from "@/services/game.service";
 
@@ -41,7 +40,7 @@ export default function GameSlugPage({ params }: { params: Promise<{ slug: strin
       <Link href="/dashboard">Back to Dashboard</Link>
       {loading ? <p>Loading game...</p> : null}
       {!loading ? <p>Game: {game?.name || slug}</p> : null}
-      <CrashGamePanel slug={slug} gameId={game?.id || null} />
+      {!loading ? <p>Game not available.</p> : null}
     </div>
   );
 }

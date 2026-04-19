@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Crash Betting Platform",
-  description: "Basic crash betting frontend",
+  title: "Stake Clone",
+  description: "Betting platform frontend",
 };
 
 export default function RootLayout({
@@ -19,4 +19,3 @@ export default function RootLayout({
     </html>
   );
 }
-

@@ -52,7 +52,7 @@ export const useAuthStore = create(
       },
     }),
     {
-      name: "crash-auth-store",
+      name: "stake-auth-store",
       storage: createJSONStorage(() => getStorage()),
       partialize: (state) => ({
         user: state.user,
@@ -62,4 +62,3 @@ export const useAuthStore = create(
     }
   )
 );
-

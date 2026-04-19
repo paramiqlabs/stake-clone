@@ -191,8 +191,6 @@ const toHistoryBetResponse = (bet) => ({
   amount: bet.amount.toString(),
   payout: bet.payout ? bet.payout.toString() : null,
   status: bet.status,
-  crashRoundId: bet.crashRoundId || null,
-  cashoutMultiplier: bet.cashoutMultiplier ? bet.cashoutMultiplier.toString() : null,
   createdAt: bet.createdAt,
 });
 
@@ -203,9 +201,6 @@ const getMyBets = async (authUserId, options = {}) => {
   const bets = await prisma.bet.findMany({
     where: {
       userId,
-      crashRoundId: {
-        not: null,
-      },
     },
     orderBy: {
       createdAt: "desc",
