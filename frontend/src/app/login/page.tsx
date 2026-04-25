@@ -16,9 +16,8 @@ export default function LoginPage() {
   }, [router, token]);
 
   return (
-    <section>
+    <section className="flex min-h-screen items-center justify-center p-4">
       <AuthForm />
     </section>
   );
 }
-

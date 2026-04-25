@@ -141,8 +141,31 @@ const toggleGame = async (id) => {
   return toApiGame(updated);
 };
 
+const launchGame = async (id) => {
+  const numericId = parseGameId(id);
+
+  const game = await prisma.game.findUnique({
+    where: { id: numericId },
+  });
+
+  if (!game || !game.isActive) {
+    throw new Error("Game is not available");
+  }
+
+  const launchUrl = typeof game.gameUrl === "string" ? game.gameUrl.trim() : "";
+  if (!launchUrl) {
+    throw new Error("Launch URL is not configured");
+  }
+
+  return {
+    gameId: game.id.toString(),
+    launchUrl,
+  };
+};
+
 module.exports = {
   getActiveGames,
   createGame,
   toggleGame,
+  launchGame,
 };

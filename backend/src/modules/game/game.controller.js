@@ -55,8 +55,29 @@ const toggleGame = async (req, res) => {
   }
 };
 
+const launchGame = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const launchData = await gameService.launchGame(id);
+    return res.status(200).json({ success: true, data: launchData });
+  } catch (error) {
+    const message = error?.message || "Internal server error";
+
+    if (message === "Game not found") {
+      return res.status(404).json({ success: false, message });
+    }
+
+    if (message === "Game is not available" || message === "Launch URL is not configured" || isBadRequestError(error)) {
+      return res.status(400).json({ success: false, message });
+    }
+
+    return res.status(500).json({ success: false, message });
+  }
+};
+
 module.exports = {
   getActiveGames,
   createGame,
   toggleGame,
+  launchGame,
 };

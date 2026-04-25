@@ -7,6 +7,7 @@ const router = express.Router();
 const upload = multer();
 
 router.get("/games", gameController.getActiveGames);
+router.post("/games/:id/launch", authenticate, gameController.launchGame);
 router.post("/admin/games", authenticate, requireAdmin, upload.none(), gameController.createGame);
 router.patch("/admin/games/:id/toggle", authenticate, requireAdmin, gameController.toggleGame);
 
