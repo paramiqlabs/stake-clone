@@ -5,6 +5,7 @@ const { Server } = require("socket.io");
 const authRoutes = require("./src/modules/auth/auth.routes");
 const betRoutes = require("./src/modules/bet/bet.routes");
 const gameRoutes = require("./src/modules/game/game.routes");
+const coreGamesRoutes = require("./src/modules/games/games.routes");
 const walletRoutes = require("./src/modules/wallet/wallet.routes");
 const { authenticateSocket } = require("./src/socket/socket.auth");
 const { setupGameSocket } = require("./src/socket/game.socket");
@@ -40,6 +41,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(authRoutes);
 app.use(betRoutes);
 app.use(gameRoutes);
+app.use(coreGamesRoutes);
 app.use(walletRoutes);
 
 app.get("/", (req, res) => {

@@ -33,13 +33,27 @@ const parsePositiveAmount = (value, fieldName) => {
   return decimalValue;
 };
 
+const parseResult = (value) => {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    return null;
+  }
+};
+
 const toBetResponse = (bet) => ({
   id: bet.id.toString(),
   userId: bet.userId.toString(),
   gameId: bet.gameId.toString(),
+  gameType: bet.gameType || null,
   amount: bet.amount.toString(),
   payout: bet.payout ? bet.payout.toString() : null,
   status: bet.status,
+  result: parseResult(bet.result),
   createdAt: bet.createdAt,
   updatedAt: bet.updatedAt,
 });
@@ -188,9 +202,11 @@ const resolveBet = async (betIdParam, payload) => {
 
 const toHistoryBetResponse = (bet) => ({
   id: bet.id.toString(),
+  gameType: bet.gameType || null,
   amount: bet.amount.toString(),
   payout: bet.payout ? bet.payout.toString() : null,
   status: bet.status,
+  result: parseResult(bet.result),
   createdAt: bet.createdAt,
 });
 
