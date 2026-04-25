@@ -17,7 +17,8 @@ type DiceGameState = {
   updateTarget: (value: string | number) => void;
   winChance: number;
   payoutMultiplier: number;
-  result: DiceResult | null;
+  rollingValue: number | null;
+  finalResult: DiceResult | null;
   isRolling: boolean;
   error: string;
   walletBalance: string;
@@ -34,12 +35,26 @@ export default function DiceGamePage() {
     updateTarget,
     winChance,
     payoutMultiplier,
-    result,
+    rollingValue,
+    finalResult,
     isRolling,
     error,
     walletBalance,
     rollDice,
   } = useDiceGame() as DiceGameState;
+
+  const visibleRoll =
+    rollingValue !== null
+      ? rollingValue
+      : finalResult?.roll !== null && finalResult?.roll !== undefined
+        ? finalResult.roll
+        : null;
+
+  const resultGlowClass = finalResult
+    ? finalResult.win
+      ? "border-emerald-400/45 shadow-[0_0_40px_rgba(34,197,94,0.22)]"
+      : "border-rose-400/45 shadow-[0_0_40px_rgba(244,63,94,0.24)]"
+    : "border-cyan-400/35";
 
   return (
     <section className="min-h-screen bg-slate-950 px-4 py-6 text-slate-100">
@@ -104,18 +119,26 @@ export default function DiceGamePage() {
 
           {error ? <p className="mt-3 text-sm text-rose-300">{error}</p> : null}
 
-          {result ? (
-            <div className="mt-5 rounded-2xl border border-cyan-400/35 bg-slate-950/85 p-5">
+          <div className={`mt-5 rounded-2xl border bg-slate-950/85 p-5 transition-all duration-300 ${resultGlowClass}`}>
               <p className="text-xs uppercase tracking-wide text-slate-400">Result</p>
-              <p className="mt-2 text-5xl font-bold text-cyan-200">
-                {result.roll !== null ? result.roll.toFixed(2) : "-"}
+              <p
+                className={`mt-2 text-center text-6xl font-bold text-cyan-200 transition-all duration-200 ${isRolling ? "scale-105" : "scale-100"}`}
+              >
+                {visibleRoll !== null ? visibleRoll : "-"}
               </p>
-              <p className={`mt-2 text-xl font-semibold ${result.win ? "text-emerald-300" : "text-rose-300"}`}>
-                {result.win ? "Win" : "Loss"}
-              </p>
-              <p className="mt-1 text-lg text-slate-200">Payout: {result.payout}</p>
-            </div>
-          ) : null}
+              {finalResult ? (
+                <>
+                  <p className={`mt-2 text-center text-xl font-semibold ${finalResult.win ? "text-emerald-300" : "text-rose-300"}`}>
+                    {finalResult.win ? "Win" : "Loss"}
+                  </p>
+                  <p className="mt-1 text-center text-lg text-slate-200">Payout: {finalResult.payout}</p>
+                </>
+              ) : (
+                <p className="mt-2 text-center text-sm text-slate-400">
+                  {isRolling ? "Rolling..." : "Roll to see the outcome"}
+                </p>
+              )}
+          </div>
         </div>
       </div>
     </section>

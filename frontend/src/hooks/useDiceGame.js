@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { playDice } from "@/services/dice.service";
 import { getWalletBalance } from "@/services/wallet.service";
 import { useAuthStore } from "@/store/useAuthStore";
@@ -17,12 +17,23 @@ const clampTarget = (value) => {
 export const useDiceGame = () => {
   const walletBalance = useAuthStore((state) => state.walletBalance);
   const setWalletBalance = useAuthStore((state) => state.setWalletBalance);
+  const rollingIntervalRef = useRef(null);
 
   const [amount, setAmount] = useState("1.00");
   const [target, setTarget] = useState(50);
-  const [result, setResult] = useState(null);
+  const [rollingValue, setRollingValue] = useState(null);
+  const [finalResult, setFinalResult] = useState(null);
   const [isRolling, setIsRolling] = useState(false);
   const [error, setError] = useState("");
+
+  const clearRollingInterval = useCallback(() => {
+    if (!rollingIntervalRef.current) {
+      return;
+    }
+
+    clearInterval(rollingIntervalRef.current);
+    rollingIntervalRef.current = null;
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -41,8 +52,9 @@ export const useDiceGame = () => {
     loadWallet();
     return () => {
       active = false;
+      clearRollingInterval();
     };
-  }, [setWalletBalance]);
+  }, [clearRollingInterval, setWalletBalance]);
 
   const winChance = useMemo(() => target, [target]);
 
@@ -65,7 +77,12 @@ export const useDiceGame = () => {
 
     setIsRolling(true);
     setError("");
-    setResult(null);
+    setFinalResult(null);
+    setRollingValue(Math.floor(Math.random() * 100));
+    clearRollingInterval();
+    rollingIntervalRef.current = setInterval(() => {
+      setRollingValue(Math.floor(Math.random() * 100));
+    }, 50);
 
     try {
       const data = await playDice({
@@ -81,6 +98,8 @@ export const useDiceGame = () => {
       const payoutValue = data?.payout ?? bet?.payout ?? "0";
       const nextBalance = data?.newBalance ?? data?.wallet?.balance;
 
+      clearRollingInterval();
+
       if (nextBalance !== undefined && nextBalance !== null) {
         setWalletBalance(String(nextBalance));
       } else {
@@ -88,17 +107,23 @@ export const useDiceGame = () => {
         setWalletBalance(freshBalance || "0");
       }
 
-      setResult({
-        roll: rolledValue !== undefined && rolledValue !== null ? Number(rolledValue) : null,
+      const resolvedRoll =
+        rolledValue !== undefined && rolledValue !== null ? Number(rolledValue) : null;
+      setRollingValue(resolvedRoll);
+      setFinalResult({
+        roll: resolvedRoll,
         win: Boolean(didWin),
         payout: String(payoutValue ?? "0"),
       });
     } catch (rollError) {
+      clearRollingInterval();
+      setRollingValue(null);
+      setFinalResult(null);
       setError(rollError instanceof Error ? rollError.message : "Failed to roll dice");
     } finally {
       setIsRolling(false);
     }
-  }, [amount, setWalletBalance, target]);
+  }, [amount, clearRollingInterval, setWalletBalance, target]);
 
   return {
     amount,
@@ -107,7 +132,8 @@ export const useDiceGame = () => {
     updateTarget,
     winChance,
     payoutMultiplier,
-    result,
+    rollingValue,
+    finalResult,
     isRolling,
     error,
     walletBalance,
