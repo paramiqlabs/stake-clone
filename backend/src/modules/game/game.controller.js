@@ -72,6 +72,7 @@ const launchGame = async (req, res) => {
 
     if (
       message === "Game is not available" ||
+      message === "Provider is required for external game" ||
       message === "Provider launch failed" ||
       message === "Provider is not supported" ||
       message === "Invalid launch URL from provider" ||

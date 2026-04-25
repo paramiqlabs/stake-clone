@@ -1,4 +1,5 @@
-const REQUIRED_STRING_FIELDS = ["name", "slug", "provider", "thumbnail", "game_url"];
+const REQUIRED_STRING_FIELDS = ["name", "slug", "thumbnail", "game_url"];
+const GAME_TYPES = new Set(["internal", "external"]);
 
 const ensureStringField = (payload, field) => {
   if (typeof payload[field] !== "string" || payload[field].trim() === "") {
@@ -57,8 +58,24 @@ const parseConfigField = (value) => {
 };
 
 const normalizeCreateGamePayload = (payload) => {
+  const typeValue = typeof payload?.type === "string" ? payload.type.trim().toLowerCase() : "external";
+  if (!GAME_TYPES.has(typeValue)) {
+    throw new Error("'type' must be 'internal' or 'external'");
+  }
+
+  const provider =
+    typeof payload?.provider === "string" && payload.provider.trim()
+      ? payload.provider.trim()
+      : undefined;
+
+  if (typeValue === "external" && !provider) {
+    throw new Error("'provider' must be a non-empty string for external games");
+  }
+
   const normalized = {
     ...payload,
+    type: typeValue,
+    provider,
     is_active: parseBooleanField(payload.is_active, "is_active"),
     config: parseConfigField(payload.config),
   };
@@ -73,6 +90,14 @@ const validateCreateGamePayload = (payload) => {
   }
 
   REQUIRED_STRING_FIELDS.forEach((field) => ensureStringField(payload, field));
+
+  if (payload.type !== undefined && (typeof payload.type !== "string" || !GAME_TYPES.has(payload.type))) {
+    throw new Error("'type' must be 'internal' or 'external'");
+  }
+
+  if (payload.provider !== undefined && typeof payload.provider !== "string") {
+    throw new Error("'provider' must be a non-empty string");
+  }
 
   if (
     payload.is_active !== undefined &&

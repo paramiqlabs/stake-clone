@@ -81,6 +81,16 @@ const ensureCoreGame = async (tx, gameType) => {
     where: { slug },
   });
   if (existing) {
+    if (String(existing.type || "").toLowerCase() !== "internal") {
+      return tx.game.update({
+        where: { id: existing.id },
+        data: {
+          type: "internal",
+          provider: null,
+          launchType: "internal",
+        },
+      });
+    }
     return existing;
   }
 
@@ -88,7 +98,8 @@ const ensureCoreGame = async (tx, gameType) => {
     data: {
       name: `Original ${gameType.charAt(0).toUpperCase()}${gameType.slice(1)}`,
       slug,
-      provider: "internal",
+      type: "internal",
+      provider: null,
       thumbnail: `${gameType}.png`,
       gameUrl: `/games/${gameType}`,
       isActive: true,

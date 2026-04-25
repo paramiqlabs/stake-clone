@@ -50,7 +50,8 @@ const toApiGame = (game) => ({
   id: game.id.toString(),
   name: game.name,
   slug: game.slug,
-  provider: game.provider,
+  type: String(game.type || "external"),
+  provider: game.provider || null,
   thumbnail: game.thumbnail,
   game_url: game.gameUrl,
   is_active: game.isActive ?? false,
@@ -114,7 +115,8 @@ const createGame = async (payload) => {
     data: {
       name: normalizedPayload.name.trim(),
       slug: normalizedPayload.slug.trim(),
-      provider: normalizedPayload.provider.trim(),
+      type: normalizedPayload.type || "external",
+      provider: normalizedPayload.provider || null,
       thumbnail: normalizedPayload.thumbnail.trim(),
       gameUrl: normalizedPayload.game_url.trim(),
       isActive: normalizedPayload.is_active ?? true,
@@ -165,6 +167,15 @@ const readProviderSessionId = (launchUrl) => {
   }
 };
 
+const INTERNAL_GAME_SLUGS = new Set([
+  "dice",
+  "mines",
+  "plinko",
+  "original-dice",
+  "original-mines",
+  "original-plinko",
+]);
+
 const launchGame = async ({ gameId, authUserId }) => {
   const userId = parseUserId(authUserId);
   const numericId = parseGameId(gameId);
@@ -190,6 +201,31 @@ const launchGame = async ({ gameId, authUserId }) => {
     throw new Error("Game is not available");
   }
 
+  const gameType = String(game.type || "external").toLowerCase();
+  const isInternalGame = gameType === "internal" || INTERNAL_GAME_SLUGS.has(String(game.slug || "").toLowerCase());
+
+  if (isInternalGame) {
+    if (gameType !== "internal" || game.provider) {
+      await prisma.game.update({
+        where: { id: game.id },
+        data: {
+          type: "internal",
+          provider: null,
+          launchType: "internal",
+        },
+      });
+    }
+
+    return {
+      mode: "internal",
+      slug: game.slug,
+    };
+  }
+
+  if (!game.provider) {
+    throw new Error("Provider is required for external game");
+  }
+
   const provider = getProvider(game.provider);
   const launchResult = await provider.launchGame({
     userId: userId.toString(),
@@ -213,6 +249,7 @@ const launchGame = async ({ gameId, authUserId }) => {
   });
 
   return {
+    mode: "external",
     launchUrl,
   };
 };

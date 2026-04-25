@@ -11,7 +11,8 @@ model Game {
   id               BigInt             @id @default(autoincrement()) @db.UnsignedBigInt
   name             String             @db.VarChar(150)
   slug             String             @unique(map: "slug") @db.VarChar(150)
-  provider         String             @db.VarChar(100)
+  type             game_type          @default(external)
+  provider         String?            @db.VarChar(100)
   providerGameId   String?            @map("provider_game_id") @db.VarChar(150)
   thumbnail        String?            @db.VarChar(255)
   banner           String?            @db.VarChar(255)
@@ -36,6 +37,11 @@ model Game {
   @@index([category], map: "idx_category")
   @@index([provider], map: "idx_provider")
   @@map("games")
+}
+
+enum game_type {
+  internal
+  external
 }
 
 enum games_launch_type {

@@ -14,6 +14,7 @@ type LobbyGame = {
   id: string;
   name: string;
   slug: string;
+  type: "internal" | "external";
   provider?: string;
 };
 
@@ -64,6 +65,7 @@ export default function DashboardPage() {
               id: String(game?.id || ""),
               name: String(game?.name || "Untitled"),
               slug: String(game?.slug || ""),
+              type: game?.type === "internal" ? "internal" : "external",
               provider: game?.provider ? String(game.provider) : "Provider",
             }))
           : [];
@@ -104,12 +106,28 @@ export default function DashboardPage() {
       setLaunchError("");
       try {
         const data = await launchGame(gameId);
-        const url = typeof data?.launchUrl === "string" ? data.launchUrl : "";
-        if (!url) {
-          throw new Error("Launch URL is missing");
+        if (data?.mode === "internal") {
+          const slug = typeof data?.slug === "string" ? data.slug.trim() : "";
+          if (!slug) {
+            throw new Error("Game slug is missing");
+          }
+
+          setLaunchUrl("");
+          router.push(`/game/${slug}`);
+          return;
         }
 
-        setLaunchUrl(url);
+        if (data?.mode === "external") {
+          const url = typeof data?.launchUrl === "string" ? data.launchUrl : "";
+          if (!url) {
+            throw new Error("Launch URL is missing");
+          }
+
+          setLaunchUrl(url);
+          return;
+        }
+
+        throw new Error("Invalid launch response");
       } catch (launchRequestError) {
         setLaunchUrl("");
         setLaunchError(
@@ -121,7 +139,7 @@ export default function DashboardPage() {
         setLaunching(false);
       }
     },
-    []
+    [router]
   );
 
   return (
