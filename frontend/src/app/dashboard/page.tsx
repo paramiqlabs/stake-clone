@@ -106,11 +106,15 @@ export default function DashboardPage() {
       setLaunchError("");
       try {
         const data = await launchGame(gameId);
+        console.log("[launch response]", data);
         if (data?.mode === "internal") {
-          const slug = typeof data?.slug === "string" ? data.slug.trim() : "";
-          if (!slug) {
+          const rawSlug = typeof data?.slug === "string" ? data.slug.trim() : "";
+          if (!rawSlug) {
             throw new Error("Game slug is missing");
           }
+          const slug = rawSlug.startsWith("original-")
+            ? rawSlug.replace("original-", "")
+            : rawSlug;
 
           setLaunchUrl("");
           router.push(`/game/${slug}`);
