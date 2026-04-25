@@ -13,7 +13,7 @@ const playDice = async (req, res) => {
   } catch (error) {
     const message = error?.message || "Internal server error";
     if (
-      message.includes("target must be") ||
+      message.includes("Invalid target") ||
       message.includes("amount") ||
       message.includes("Invalid user id") ||
       message.includes("Insufficient balance")

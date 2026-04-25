@@ -95,6 +95,7 @@ model Bet {
   amount    Decimal
   payout    Decimal?
   result    String?   @db.LongText
+  metadata  Json?
   status    String
   user      User      @relation(fields: [userId], references: [id])
   game      Game      @relation(fields: [gameId], references: [id])

@@ -6,8 +6,8 @@ const HOUSE_EDGE_FACTOR = new Prisma.Decimal("0.99");
 
 const parseTarget = (value) => {
   const target = Number(value);
-  if (!Number.isFinite(target) || target <= 1 || target >= 100) {
-    throw new Error("target must be between 1 and 100");
+  if (!Number.isFinite(target) || target < 1 || target > 99) {
+    throw new Error("Invalid target");
   }
 
   return target;
@@ -16,7 +16,7 @@ const parseTarget = (value) => {
 const playDice = async ({ userId, amount, target, clientSeed }) => {
   const parsedTarget = parseTarget(target);
 
-  return coreGameService.placeBet({
+  const coreResult = await coreGameService.placeBet({
     userId,
     gameType: "dice",
     amount,
@@ -48,6 +48,17 @@ const playDice = async ({ userId, amount, target, clientSeed }) => {
       };
     },
   });
+
+  const roll = Number(coreResult?.bet?.result?.roll ?? 0);
+  const win = String(coreResult?.bet?.status || "").toLowerCase() === "won";
+
+  return {
+    roll,
+    win,
+    payout: coreResult?.bet?.payout ? String(coreResult.bet.payout) : "0",
+    newBalance: coreResult?.wallet?.balance ? String(coreResult.wallet.balance) : "0",
+    betId: coreResult?.bet?.id || null,
+  };
 };
 
 module.exports = {

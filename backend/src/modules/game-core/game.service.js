@@ -58,6 +58,7 @@ const toBetResponse = (bet) => ({
   payout: bet.payout ? bet.payout.toString() : null,
   status: bet.status,
   result: parseResult(bet.result),
+  metadata: bet.metadata || null,
   createdAt: bet.createdAt,
   updatedAt: bet.updatedAt,
 });
@@ -105,7 +106,7 @@ const createDebitTransaction = (tx, { userId, amount, reference }) =>
   tx.transaction.create({
     data: {
       userId,
-      amount,
+      amount: new Prisma.Decimal(amount).neg(),
       type: "debit",
       status: "success",
       reference,
@@ -179,6 +180,10 @@ const placeBet = async ({ userId, gameType, amount, config = {}, resolver }) => 
         gameType: normalizedGameType,
         amount: parsedAmount,
         status: BET_STATUS_PENDING,
+        metadata: {
+          config,
+          fairness,
+        },
         result: JSON.stringify({
           phase: "locked",
           fairness,
@@ -212,6 +217,11 @@ const placeBet = async ({ userId, gameType, amount, config = {}, resolver }) => 
       data: {
         status,
         payout: status === BET_STATUS_WON ? payout : null,
+        metadata: {
+          config,
+          fairness,
+          resolvedAt: new Date().toISOString(),
+        },
         result: JSON.stringify({
           ...resultPayload,
           fairness,

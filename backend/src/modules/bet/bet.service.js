@@ -54,6 +54,7 @@ const toBetResponse = (bet) => ({
   payout: bet.payout ? bet.payout.toString() : null,
   status: bet.status,
   result: parseResult(bet.result),
+  metadata: bet.metadata || null,
   createdAt: bet.createdAt,
   updatedAt: bet.updatedAt,
 });
@@ -207,6 +208,7 @@ const toHistoryBetResponse = (bet) => ({
   payout: bet.payout ? bet.payout.toString() : null,
   status: bet.status,
   result: parseResult(bet.result),
+  metadata: bet.metadata || null,
   createdAt: bet.createdAt,
 });
 

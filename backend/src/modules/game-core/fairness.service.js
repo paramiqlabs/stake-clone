@@ -28,7 +28,7 @@ const randomAt = ({ clientSeed, nonce, cursor }) =>
 
 const generateDiceRoll = ({ clientSeed, nonce }) => {
   const value = randomAt({ clientSeed, nonce, cursor: 0 });
-  return Number((value * 100).toFixed(2));
+  return Math.min(99, Math.floor(value * 100));
 };
 
 const generateMines = ({ clientSeed, nonce, mineCount, totalTiles }) => {
