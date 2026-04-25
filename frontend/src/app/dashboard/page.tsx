@@ -124,17 +124,9 @@ export default function DashboardPage() {
     []
   );
 
-  useEffect(() => {
-    if (!selectedGameId || loading) {
-      return;
-    }
-
-    handleLaunchGame(selectedGameId);
-  }, [selectedGameId, loading, handleLaunchGame]);
-
   return (
     <section className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="mx-auto grid min-h-screen w-full max-w-[1440px] grid-cols-1 gap-4 p-4 lg:grid-cols-[320px_1fr]">
+      <div className="grid min-h-screen w-full grid-cols-1 gap-4 p-4 lg:grid-cols-[320px_1fr]">
         <aside className="rounded-3xl border border-slate-800 bg-slate-900/65 p-4 backdrop-blur-sm">
           <div className="mb-4">
             <h1 className="text-2xl font-semibold tracking-tight text-cyan-200">Lobby</h1>
@@ -151,9 +143,11 @@ export default function DashboardPage() {
                 game={game}
                 active={String(game.id) === String(selectedGameId)}
                 disabled={launching && String(game.id) === String(selectedGameId)}
-                onClick={() => {
-                  setSelectedGameId(String(game.id));
+                onClick={async () => {
+                  const nextGameId = String(game.id);
+                  setSelectedGameId(nextGameId);
                   setLaunchError("");
+                  await handleLaunchGame(nextGameId);
                 }}
               />
             ))}
@@ -174,6 +168,17 @@ export default function DashboardPage() {
               </button>
               <button
                 type="button"
+                className="rounded-xl border border-rose-300/50 px-4 py-2 text-sm text-rose-100 transition hover:scale-[1.03] hover:border-rose-200"
+                onClick={() => {
+                  setLaunchUrl("");
+                  setLaunchError("");
+                }}
+                disabled={!launchUrl || launching}
+              >
+                Exit Game
+              </button>
+              <button
+                type="button"
                 className="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-200 transition hover:scale-[1.03] hover:border-slate-500"
                 onClick={() => {
                   logout();
@@ -190,6 +195,10 @@ export default function DashboardPage() {
             launchUrl={launchUrl}
             loading={launching || loading}
             error={launchError}
+            onExit={() => {
+              setLaunchUrl("");
+              setLaunchError("");
+            }}
           />
         </main>
       </div>
