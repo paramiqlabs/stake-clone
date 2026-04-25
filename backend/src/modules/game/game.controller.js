@@ -58,16 +58,26 @@ const toggleGame = async (req, res) => {
 const launchGame = async (req, res) => {
   try {
     const { id } = req.params;
-    const launchData = await gameService.launchGame(id);
+    const launchData = await gameService.launchGame({
+      gameId: id,
+      authUserId: req.user?.id,
+    });
     return res.status(200).json({ success: true, data: launchData });
   } catch (error) {
     const message = error?.message || "Internal server error";
 
-    if (message === "Game not found") {
+    if (message === "Game not found" || message === "User not found") {
       return res.status(404).json({ success: false, message });
     }
 
-    if (message === "Game is not available" || message === "Launch URL is not configured" || isBadRequestError(error)) {
+    if (
+      message === "Game is not available" ||
+      message === "Provider launch failed" ||
+      message === "Provider is not supported" ||
+      message === "Invalid launch URL from provider" ||
+      message === "Invalid user id" ||
+      isBadRequestError(error)
+    ) {
       return res.status(400).json({ success: false, message });
     }
 

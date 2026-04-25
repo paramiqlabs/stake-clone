@@ -1,5 +1,6 @@
 const prisma = require("../../lib/prisma");
 const redis = require("../../lib/redis");
+const { getProvider } = require("../../providers/provider.factory");
 const { normalizeCreateGamePayload } = require("./game.model");
 
 const LAUNCH_TYPES = new Set(["iframe", "redirect", "internal"]);
@@ -22,6 +23,15 @@ const parseGameId = (id) => {
   const asString = String(id);
   if (!/^\d+$/.test(asString)) {
     throw new Error("Invalid game id");
+  }
+
+  return BigInt(asString);
+};
+
+const parseUserId = (id) => {
+  const asString = String(id || "");
+  if (!/^\d+$/.test(asString)) {
+    throw new Error("Invalid user id");
   }
 
   return BigInt(asString);
@@ -141,24 +151,68 @@ const toggleGame = async (id) => {
   return toApiGame(updated);
 };
 
-const launchGame = async (id) => {
-  const numericId = parseGameId(id);
+const readProviderSessionId = (launchUrl) => {
+  try {
+    const url = new URL(launchUrl);
+    const sessionId = url.searchParams.get("session");
+    if (!sessionId) {
+      throw new Error("Provider session is missing");
+    }
+
+    return sessionId;
+  } catch (error) {
+    throw new Error("Invalid launch URL from provider");
+  }
+};
+
+const launchGame = async ({ gameId, authUserId }) => {
+  const userId = parseUserId(authUserId);
+  const numericId = parseGameId(gameId);
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true },
+  });
+
+  if (!user) {
+    throw new Error("User not found");
+  }
 
   const game = await prisma.game.findUnique({
     where: { id: numericId },
   });
 
-  if (!game || !game.isActive) {
+  if (!game) {
+    throw new Error("Game not found");
+  }
+
+  if (!game.isActive) {
     throw new Error("Game is not available");
   }
 
-  const launchUrl = typeof game.gameUrl === "string" ? game.gameUrl.trim() : "";
+  const provider = getProvider(game.provider);
+  const launchResult = await provider.launchGame({
+    userId: userId.toString(),
+    gameId: numericId.toString(),
+  });
+
+  const launchUrl = typeof launchResult?.launchUrl === "string" ? launchResult.launchUrl.trim() : "";
   if (!launchUrl) {
-    throw new Error("Launch URL is not configured");
+    throw new Error("Provider launch failed");
   }
 
+  const providerSessionId = readProviderSessionId(launchUrl);
+
+  await prisma.gameSession.create({
+    data: {
+      userId,
+      gameId: numericId,
+      providerSessionId,
+      status: "active",
+    },
+  });
+
   return {
-    gameId: game.id.toString(),
     launchUrl,
   };
 };
